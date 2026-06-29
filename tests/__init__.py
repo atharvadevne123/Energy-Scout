@@ -1,0 +1,1 @@
+"""Energy-Scout test suite."""

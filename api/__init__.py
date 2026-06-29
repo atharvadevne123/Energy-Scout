@@ -1,0 +1,1 @@
+"""Energy-Scout API package."""

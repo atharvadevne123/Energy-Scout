@@ -1,0 +1,72 @@
+version: "3.9"
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8003:8000"
+    environment:
+      - FOUNDRY_HOST=${FOUNDRY_HOST}
+      - FOUNDRY_TOKEN=${FOUNDRY_TOKEN}
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+    env_file:
+      - ../.env.example
+    depends_on:
+      - mlflow
+    restart: unless-stopped
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.14.1
+    ports:
+      - "5003:5000"
+    command: mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri sqlite:///mlflow.db --default-artifact-root /mlartifacts
+    volumes:
+      - mlflow_data:/mlartifacts
+    restart: unless-stopped
+
+  airflow-webserver:
+    image: apache/airflow:2.9.1
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - FOUNDRY_HOST=${FOUNDRY_HOST}
+      - FOUNDRY_TOKEN=${FOUNDRY_TOKEN}
+    ports:
+      - "8083:8080"
+    command: webserver
+    depends_on:
+      - postgres
+    volumes:
+      - ../pipeline/airflow:/opt/airflow/dags
+    restart: unless-stopped
+
+  airflow-scheduler:
+    image: apache/airflow:2.9.1
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - FOUNDRY_HOST=${FOUNDRY_HOST}
+      - FOUNDRY_TOKEN=${FOUNDRY_TOKEN}
+    command: scheduler
+    depends_on:
+      - postgres
+    volumes:
+      - ../pipeline/airflow:/opt/airflow/dags
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  mlflow_data:
+  postgres_data:
