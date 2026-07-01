@@ -517,6 +517,107 @@ def _generate_efficiency_recommendations(building_id: str, period: str) -> list[
     ]
 
 
+@ns.route("/cost-estimate")
+class CostEstimate(Resource):
+    """Estimate electricity cost for a forecast request given a tariff rate."""
+
+    def post(self):
+        body = request.get_json(force=True) or {}
+        forecast_kwh  = body.get("forecast_kwh")
+        rate_per_kwh  = body.get("rate_per_kwh", 0.12)   # default USD/kWh
+        currency      = body.get("currency", "USD")
+        tariff        = body.get("tariff", "flat")        # flat | time_of_use | tiered
+
+        if not forecast_kwh or not isinstance(forecast_kwh, list):
+            return {"error": "'forecast_kwh' must be a list of hourly values."}, 400
+
+        kwh_list = [float(v) for v in forecast_kwh]
+        rate     = float(rate_per_kwh)
+
+        # Time-of-use pricing: 1.6× peak (8 AM-8 PM), 0.75× off-peak
+        if tariff == "time_of_use":
+            hourly_costs = []
+            for hour_idx, kwh in enumerate(kwh_list):
+                hour = hour_idx % 24
+                multiplier = 1.6 if 8 <= hour < 20 else 0.75
+                hourly_costs.append(round(kwh * rate * multiplier, 4))
+        elif tariff == "tiered":
+            # Tiered: first 500 kWh/day at base, above at 1.4× rate
+            daily_total = sum(kwh_list)
+            if daily_total <= 500:
+                hourly_costs = [round(v * rate, 4) for v in kwh_list]
+            else:
+                factor = (500 * rate + (daily_total - 500) * rate * 1.4) / (daily_total * rate)
+                hourly_costs = [round(v * rate * factor, 4) for v in kwh_list]
+        else:  # flat
+            hourly_costs = [round(v * rate, 4) for v in kwh_list]
+
+        total_kwh  = round(sum(kwh_list), 2)
+        total_cost = round(sum(hourly_costs), 4)
+        peak_hour  = int(kwh_list.index(max(kwh_list)))
+
+        REQUEST_COUNT.labels(endpoint="cost_estimate", status="200").inc()
+        return {
+            "total_kwh":        total_kwh,
+            "total_cost":       total_cost,
+            "currency":         currency,
+            "rate_per_kwh":     rate,
+            "tariff":           tariff,
+            "peak_hour":        peak_hour,
+            "peak_kwh":         round(max(kwh_list), 2),
+            "avg_hourly_cost":  round(total_cost / len(hourly_costs), 4),
+            "hourly_costs":     hourly_costs,
+        }, 200
+
+
+@ns.route("/carbon-footprint")
+class CarbonFootprint(Resource):
+    """Estimate CO2 emissions for a given energy consumption (kWh)."""
+
+    # Average grid emission factors (kg CO2e / kWh) by region
+    _GRID_FACTORS = {
+        "US":     0.386,
+        "EU":     0.233,
+        "UK":     0.193,
+        "IN":     0.708,
+        "CN":     0.555,
+        "AU":     0.656,
+        "CA":     0.130,
+        "BR":     0.074,
+        "GLOBAL": 0.475,
+    }
+
+    def post(self):
+        body           = request.get_json(force=True) or {}
+        total_kwh      = body.get("total_kwh")
+        solar_kwh      = float(body.get("solar_kwh", 0))
+        grid_region    = body.get("grid_region", "US").upper()
+
+        if total_kwh is None or float(total_kwh) < 0:
+            return {"error": "'total_kwh' must be a non-negative number."}, 400
+
+        total_kwh = float(total_kwh)
+        net_kwh   = max(0.0, total_kwh - solar_kwh)
+        factor    = self._GRID_FACTORS.get(grid_region, self._GRID_FACTORS["GLOBAL"])
+
+        co2_kg    = round(net_kwh * factor, 3)
+        co2_saved = round(solar_kwh * factor, 3)
+        trees_eq  = round(co2_kg / 21.77, 2)   # 1 tree absorbs ~21.77 kg CO2/yr
+
+        REQUEST_COUNT.labels(endpoint="carbon_footprint", status="200").inc()
+        return {
+            "total_kwh":         total_kwh,
+            "solar_kwh":         solar_kwh,
+            "net_grid_kwh":      round(net_kwh, 2),
+            "grid_region":       grid_region,
+            "emission_factor":   factor,
+            "co2_kg":            co2_kg,
+            "co2_saved_by_solar_kg": co2_saved,
+            "trees_equivalent":  trees_eq,
+            "unit":              "kg CO2e",
+        }, 200
+
+
 # ─── Entry point ──────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

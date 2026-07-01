@@ -1,5 +1,10 @@
 # Energy-Scout
 
+[![CI](https://github.com/atharvadevne123/Energy-Scout/actions/workflows/ci.yml/badge.svg)](https://github.com/atharvadevne123/Energy-Scout/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11-blue)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Palantir Foundry](https://img.shields.io/badge/Palantir-Foundry-orange)](https://www.palantir.com/platforms/foundry/)
+
 > ML-powered energy demand forecasting and anomaly detection API — XGBoost-LightGBM ensemble with temporal feature engineering, solar net consumption, and Palantir Foundry integration.
 
 ## Overview
@@ -48,7 +53,9 @@ Energy-Scout forecasts hourly electricity consumption for residential, commercia
 | `POST` | `/forecast` | Forecast energy demand for a meter |
 | `POST` | `/forecast/batch` | Forecast up to 200 meters |
 | `POST` | `/anomaly` | Detect anomaly in a meter reading |
-| `GET` | `/efficiency` | Building-level consumption benchmarks |
+| `POST` | `/cost-estimate` | Electricity cost estimate (flat/TOU/tiered tariff) |
+| `POST` | `/carbon-footprint` | CO2 emissions estimate by grid region |
+| `GET` | `/efficiency` | Building-level efficiency recommendations |
 | `GET` | `/health` | Liveness probe |
 | `GET` | `/metrics` | Prometheus metrics |
 | `GET` | `/model/info` | Model version and building type metadata |

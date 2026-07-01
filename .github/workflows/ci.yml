@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install numpy pandas scikit-learn xgboost lightgbm imbalanced-learn \
+            flask flask-restx flask-cors flask-limiter gunicorn marshmallow \
+            evidently prometheus-client shap scipy loguru joblib python-dotenv \
+            pydantic pyarrow requests pytest pytest-cov pytest-mock ruff
+
+      - name: Lint with ruff
+        run: ruff check . --ignore E501,F401
+
+      - name: Run tests
+        run: pytest tests/ -v --tb=short --cov=. --cov-report=term-missing
+
+  docker-build:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Docker image
+        run: docker build -f docker/Dockerfile -t energy-scout:ci .
