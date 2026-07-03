@@ -11,11 +11,12 @@ Wraps the Foundry REST API with:
 
 from __future__ import annotations
 
+import concurrent.futures
 import io
 import os
 import time
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 
 import pandas as pd
 import requests
@@ -46,6 +47,10 @@ def _build_session(max_retries: int = MAX_RETRIES) -> requests.Session:
 
 class FoundryError(Exception):
     """Raised when a Foundry API call fails."""
+
+
+class FoundrySchemaError(FoundryError):
+    """Raised when a DataFrame does not match the Foundry dataset schema."""
 
 
 class FoundryClient:
@@ -125,6 +130,305 @@ class FoundryClient:
         predictions_df = predictions_df.copy()
         predictions_df["logged_at"] = datetime.now(timezone.utc).isoformat()
         return self.upload_dataset(predictions_df, dataset_rid)
+
+    def get_schema(self, dataset_rid: str, branch: str = "master") -> dict[str, Any]:
+        """Fetch the schema of a dataset branch."""
+        return self._get(f"{self.host}/api/v1/datasets/{dataset_rid}/schema?branchId={branch}")
+
+    def validate_data_quality(
+        self,
+        df: pd.DataFrame,
+        required_columns: list[str],
+        null_threshold: float = 0.05,
+    ) -> dict[str, Any]:
+        """
+        Validate a DataFrame before uploading to Foundry.
+
+        Checks that all required columns are present and that no column
+        exceeds the allowed null ratio. Returns a dict with a ``passed``
+        bool and an ``issues`` list describing every violation found.
+        """
+        issues: list[str] = []
+        missing = [c for c in required_columns if c not in df.columns]
+        if missing:
+            issues.append(f"Missing required columns: {missing}")
+
+        if len(df) == 0:
+            issues.append("DataFrame is empty.")
+        else:
+            for col, ratio in df.isna().mean().items():
+                if ratio > null_threshold:
+                    issues.append(
+                        f"Column '{col}' has {ratio:.1%} nulls "
+                        f"(threshold {null_threshold:.1%})."
+                    )
+
+        result = {"passed": not issues, "issues": issues, "row_count": len(df)}
+        if issues:
+            logger.warning("Data quality check failed: {}", issues)
+        else:
+            logger.info("Data quality check passed ({:,} rows).", len(df))
+        return result
+
+    # ------------------------------------------------------------------
+    # Advanced API
+    # ------------------------------------------------------------------
+
+    def stream_records(
+        self,
+        records_iterator: Iterable[dict[str, Any]],
+        dataset_rid: str,
+        chunk_size: int = 1000,
+    ) -> dict[str, Any]:
+        """
+        Stream an iterator of record dicts into a Foundry dataset.
+
+        Records are batched into DataFrames of ``chunk_size`` rows and each
+        chunk is uploaded in its own APPEND transaction, so arbitrarily
+        large (or unbounded) iterators can be ingested with constant memory.
+
+        Returns a summary dict with total rows and chunk count.
+        """
+        total_rows = 0
+        chunks = 0
+        batch: list[dict[str, Any]] = []
+
+        def _flush(rows: list[dict[str, Any]]) -> None:
+            nonlocal total_rows, chunks
+            if not rows:
+                return
+            df = pd.DataFrame(rows)
+            txn = self._post(
+                f"{self.host}/api/v1/datasets/{dataset_rid}/transactions",
+                json={"branchId": "master", "transactionType": "APPEND"},
+            )
+            txn_rid = txn["rid"]
+            try:
+                buf = io.BytesIO()
+                df.to_parquet(buf, index=False)
+                buf.seek(0)
+                self._put_file(
+                    dataset_rid, txn_rid, f"stream/chunk-{chunks:06d}.parquet", buf.read()
+                )
+                self._commit_transaction(dataset_rid, txn_rid)
+            except Exception as exc:
+                self._abort_transaction(dataset_rid, txn_rid)
+                raise FoundryError(f"Streaming chunk {chunks} failed: {exc}") from exc
+            total_rows += len(df)
+            chunks += 1
+            logger.info("Streamed chunk {} ({:,} rows) to {}.", chunks, len(df), dataset_rid)
+
+        for record in records_iterator:
+            batch.append(record)
+            if len(batch) >= chunk_size:
+                _flush(batch)
+                batch = []
+        _flush(batch)
+
+        logger.success(
+            "Streaming complete: {:,} rows in {} chunk(s) to {}.",
+            total_rows, chunks, dataset_rid,
+        )
+        return {"rows": total_rows, "chunks": chunks, "dataset_rid": dataset_rid}
+
+    def get_lineage(self, dataset_rid: str) -> dict[str, Any]:
+        """Fetch upstream/downstream lineage for a dataset."""
+        lineage = self._get(
+            f"{self.host}/foundry-catalog/api/catalog/datasets/{dataset_rid}/lineage"
+        )
+        logger.info(
+            "Fetched lineage for {}: {} upstream, {} downstream.",
+            dataset_rid,
+            len(lineage.get("upstream", [])),
+            len(lineage.get("downstream", [])),
+        )
+        return lineage
+
+    def subscribe_to_dataset(
+        self,
+        dataset_rid: str,
+        webhook_url: str,
+        event_types: Optional[list[str]] = None,
+    ) -> dict[str, Any]:
+        """
+        Register a webhook subscription for dataset events.
+
+        By default subscribes to ``TRANSACTION_COMMITTED`` so the webhook
+        fires whenever new data lands on the dataset.
+        """
+        event_types = event_types or ["TRANSACTION_COMMITTED"]
+        resp = self._post(
+            f"{self.host}/foundry-catalog/api/catalog/datasets/{dataset_rid}/subscriptions",
+            json={"webhookUrl": webhook_url, "eventTypes": event_types},
+        )
+        logger.success(
+            "Subscribed {} to {} for events {}.", webhook_url, dataset_rid, event_types
+        )
+        return resp
+
+    def enforce_schema(
+        self,
+        df: pd.DataFrame,
+        dataset_rid: str,
+        branch: str = "master",
+    ) -> dict[str, Any]:
+        """
+        Validate a DataFrame against the dataset's Foundry schema.
+
+        Checks that every schema column exists in the DataFrame and that
+        dtypes are compatible. Raises :class:`FoundrySchemaError` on any
+        mismatch; returns the fetched schema when validation passes.
+        """
+        schema = self.get_schema(dataset_rid, branch)
+        fields = schema.get("fieldSchemaList", schema.get("fields", []))
+
+        type_map = {
+            "STRING": ("object", "string"),
+            "INTEGER": ("int8", "int16", "int32", "int64", "Int64"),
+            "LONG": ("int8", "int16", "int32", "int64", "Int64"),
+            "DOUBLE": ("float16", "float32", "float64"),
+            "FLOAT": ("float16", "float32", "float64"),
+            "BOOLEAN": ("bool", "boolean"),
+            "TIMESTAMP": ("datetime64[ns]", "datetime64[ns, UTC]"),
+            "DATE": ("datetime64[ns]", "object"),
+        }
+
+        problems: list[str] = []
+        for field in fields:
+            name = field.get("name")
+            ftype = str(field.get("type", "")).upper()
+            if name not in df.columns:
+                problems.append(f"Missing column '{name}' (expected {ftype}).")
+                continue
+            expected = type_map.get(ftype)
+            if expected and str(df[name].dtype) not in expected:
+                problems.append(
+                    f"Column '{name}' has dtype {df[name].dtype}, "
+                    f"expected one of {expected} for Foundry type {ftype}."
+                )
+
+        if problems:
+            raise FoundrySchemaError(
+                f"DataFrame does not match schema of {dataset_rid}: {problems}"
+            )
+        logger.info("Schema enforcement passed for {} ({} fields).", dataset_rid, len(fields))
+        return schema
+
+    def export_snapshot(
+        self,
+        dataset_rid: str,
+        output_path: str,
+        branch: str = "master",
+        format: str = "parquet",
+    ) -> str:
+        """
+        Download a dataset branch and save it locally.
+
+        ``format`` may be ``parquet`` or ``csv``. Returns the output path.
+        """
+        if format not in ("parquet", "csv"):
+            raise ValueError(f"Unsupported format '{format}' (use 'parquet' or 'csv').")
+
+        df = self.read_dataset(dataset_rid, branch)
+        out_dir = os.path.dirname(output_path)
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+
+        if format == "parquet":
+            df.to_parquet(output_path, index=False)
+        else:
+            df.to_csv(output_path, index=False)
+
+        logger.success(
+            "Exported {:,} rows from {} to {} ({}).",
+            len(df), dataset_rid, output_path, format,
+        )
+        return output_path
+
+    def push_metrics(
+        self,
+        metrics_dict: dict[str, Any],
+        dashboard_rid: str,
+        run_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Push a metrics payload to a Foundry metrics sink / dashboard."""
+        payload = {
+            "dashboardRid": dashboard_rid,
+            "metrics": metrics_dict,
+            "runId": run_id,
+            "recordedAt": datetime.now(timezone.utc).isoformat(),
+            "service": "energy-scout",
+        }
+        resp = self._post(f"{self.host}/foundry-metrics/api/metrics", json=payload)
+        logger.success(
+            "Pushed {} metric(s) to dashboard {}.", len(metrics_dict), dashboard_rid
+        )
+        return resp
+
+    def health_check(self) -> dict[str, Any]:
+        """
+        Ping the Foundry catalog health endpoint.
+
+        Returns ``{'status': <str>, 'latency_ms': <float>}``. Never raises:
+        connection failures are reported as ``status='unreachable'``.
+        """
+        url = f"{self.host}/foundry-catalog/api/catalog/health"
+        start = time.monotonic()
+        try:
+            resp = self._session.get(url, headers=self._headers(), timeout=self.timeout)
+            latency_ms = (time.monotonic() - start) * 1000.0
+            status = "healthy" if resp.ok else f"unhealthy ({resp.status_code})"
+        except requests.RequestException as exc:
+            latency_ms = (time.monotonic() - start) * 1000.0
+            logger.error("Foundry health check failed: {}", exc)
+            status = "unreachable"
+        result = {"status": status, "latency_ms": round(latency_ms, 2)}
+        logger.info("Foundry health: {} ({} ms).", result["status"], result["latency_ms"])
+        return result
+
+    def async_upload_dataset(
+        self,
+        df: pd.DataFrame,
+        dataset_rid: str,
+        branch: str = "master",
+    ) -> concurrent.futures.Future:
+        """
+        Upload a DataFrame without blocking the caller.
+
+        Runs :meth:`upload_dataset` in a background thread and returns the
+        Future; call ``.result()`` to wait for and retrieve the transaction
+        metadata (or re-raise any upload error).
+        """
+        executor = getattr(self, "_executor", None)
+        if executor is None:
+            executor = concurrent.futures.ThreadPoolExecutor(
+                max_workers=4, thread_name_prefix="foundry-upload"
+            )
+            self._executor = executor
+        logger.info(
+            "Scheduling async upload of {:,} rows to {} (branch={}).",
+            len(df), dataset_rid, branch,
+        )
+        return executor.submit(self.upload_dataset, df, dataset_rid, branch)
+
+    # ------------------------------------------------------------------
+    # Context manager support
+    # ------------------------------------------------------------------
+
+    def __enter__(self) -> "FoundryClient":
+        return self
+
+    def __exit__(self, *args) -> None:
+        self.close()
+
+    def close(self) -> None:
+        """Release the HTTP session and any background upload threads."""
+        executor = getattr(self, "_executor", None)
+        if executor is not None:
+            executor.shutdown(wait=True)
+            self._executor = None
+        self._session.close()
+        logger.debug("FoundryClient closed.")
 
     # ------------------------------------------------------------------
     # Low-level REST helpers
