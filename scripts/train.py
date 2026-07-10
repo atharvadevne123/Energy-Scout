@@ -17,11 +17,11 @@ import pandas as pd
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-from loguru import logger
+from loguru import logger  # noqa: E402
 
-from models.anomaly.consumption_anomaly import ConsumptionAnomalyDetector
-from models.ensemble.demand_forecaster import DemandForecaster
-from pipeline.feature_engineering import EnergyFeatureEngineer
+from models.anomaly.consumption_anomaly import ConsumptionAnomalyDetector  # noqa: E402
+from models.ensemble.demand_forecaster import DemandForecaster  # noqa: E402
+from pipeline.feature_engineering import EnergyFeatureEngineer  # noqa: E402
 
 
 def generate_synthetic_data(n: int = 50000) -> pd.DataFrame:
