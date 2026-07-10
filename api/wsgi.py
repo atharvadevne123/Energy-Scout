@@ -7,7 +7,7 @@ Usage:
 
 from __future__ import annotations
 
-from api.app import app, _load_models
+from api.app import _load_models, app
 
 _load_models()
 

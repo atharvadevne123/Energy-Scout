@@ -16,7 +16,6 @@ from foundry.foundry_client import (
     FoundrySchemaError,
 )
 
-
 HOST = "https://foundry.example.com"
 
 
@@ -46,9 +45,10 @@ def sample_df():
 # upload_dataset
 # ---------------------------------------------------------------------------
 
+
 def test_upload_dataset_commits_transaction(client, sample_df):
     client._session.post.side_effect = [
-        _response(json_data={"rid": "txn-1"}),   # open transaction
+        _response(json_data={"rid": "txn-1"}),  # open transaction
         _response(json_data={"committed": True}),  # commit
     ]
     client._session.put.return_value = _response()
@@ -64,7 +64,7 @@ def test_upload_dataset_commits_transaction(client, sample_df):
 def test_upload_dataset_aborts_on_failure(client, sample_df):
     client._session.post.side_effect = [
         _response(json_data={"rid": "txn-1"}),  # open transaction
-        _response(json_data={}),                 # abort
+        _response(json_data={}),  # abort
     ]
     client._session.put.return_value = _response(status_code=500, json_data={})
 
@@ -79,16 +79,21 @@ def test_upload_dataset_aborts_on_failure(client, sample_df):
 # read_dataset
 # ---------------------------------------------------------------------------
 
+
 def test_read_dataset_concatenates_parquet_files(client, sample_df):
     buf = io.BytesIO()
     sample_df.to_parquet(buf, index=False)
     parquet_bytes = buf.getvalue()
 
     client._session.get.side_effect = [
-        _response(json_data={"data": [
-            {"logicalPath": "part-0.parquet"},
-            {"logicalPath": "notes.txt"},
-        ]}),
+        _response(
+            json_data={
+                "data": [
+                    {"logicalPath": "part-0.parquet"},
+                    {"logicalPath": "notes.txt"},
+                ]
+            }
+        ),
         _response(content=parquet_bytes),
     ]
 
@@ -107,6 +112,7 @@ def test_read_dataset_empty_when_no_parquet(client):
 # validate_data_quality
 # ---------------------------------------------------------------------------
 
+
 def test_validate_data_quality_passes(client, sample_df):
     result = client.validate_data_quality(sample_df, required_columns=["id", "score"])
     assert result["passed"] is True
@@ -116,9 +122,7 @@ def test_validate_data_quality_passes(client, sample_df):
 
 def test_validate_data_quality_flags_missing_columns_and_nulls(client):
     df = pd.DataFrame({"id": [1, None, None, None]})
-    result = client.validate_data_quality(
-        df, required_columns=["id", "label"], null_threshold=0.05
-    )
+    result = client.validate_data_quality(df, required_columns=["id", "label"], null_threshold=0.05)
     assert result["passed"] is False
     assert any("label" in issue for issue in result["issues"])
     assert any("nulls" in issue for issue in result["issues"])
@@ -128,11 +132,10 @@ def test_validate_data_quality_flags_missing_columns_and_nulls(client):
 # register_model
 # ---------------------------------------------------------------------------
 
+
 def test_register_model_posts_metadata(client):
     client._session.post.return_value = _response(json_data={"modelRid": "m-1"})
-    result = client.register_model(
-        {"name": "clf", "version": "1.0", "framework": "sklearn"}
-    )
+    result = client.register_model({"name": "clf", "version": "1.0", "framework": "sklearn"})
     assert result == {"modelRid": "m-1"}
     sent = client._session.post.call_args[1]["json"]
     assert sent["name"] == "clf"
@@ -147,6 +150,7 @@ def test_register_model_requires_keys(client):
 # ---------------------------------------------------------------------------
 # health_check
 # ---------------------------------------------------------------------------
+
 
 def test_health_check_healthy(client):
     client._session.get.return_value = _response(json_data={"status": "ok"})
@@ -167,6 +171,7 @@ def test_health_check_unreachable(client):
 # stream_records
 # ---------------------------------------------------------------------------
 
+
 def test_stream_records_chunks_and_appends(client):
     # Every POST opens or commits a transaction.
     client._session.post.return_value = _response(json_data={"rid": "txn-s"})
@@ -186,24 +191,29 @@ def test_stream_records_chunks_and_appends(client):
 # enforce_schema
 # ---------------------------------------------------------------------------
 
+
 def test_enforce_schema_raises_on_mismatch(client, sample_df):
-    client._session.get.return_value = _response(json_data={
-        "fieldSchemaList": [
-            {"name": "id", "type": "INTEGER"},
-            {"name": "missing_col", "type": "STRING"},
-        ]
-    })
+    client._session.get.return_value = _response(
+        json_data={
+            "fieldSchemaList": [
+                {"name": "id", "type": "INTEGER"},
+                {"name": "missing_col", "type": "STRING"},
+            ]
+        }
+    )
     with pytest.raises(FoundrySchemaError):
         client.enforce_schema(sample_df, "ri.foundry.main.dataset.abc")
 
 
 def test_enforce_schema_passes(client, sample_df):
-    client._session.get.return_value = _response(json_data={
-        "fieldSchemaList": [
-            {"name": "id", "type": "INTEGER"},
-            {"name": "score", "type": "DOUBLE"},
-        ]
-    })
+    client._session.get.return_value = _response(
+        json_data={
+            "fieldSchemaList": [
+                {"name": "id", "type": "INTEGER"},
+                {"name": "score", "type": "DOUBLE"},
+            ]
+        }
+    )
     schema = client.enforce_schema(sample_df, "ri.foundry.main.dataset.abc")
     assert "fieldSchemaList" in schema
 
@@ -211,6 +221,7 @@ def test_enforce_schema_passes(client, sample_df):
 # ---------------------------------------------------------------------------
 # context manager
 # ---------------------------------------------------------------------------
+
 
 def test_context_manager_closes_session(client):
     with client as c:

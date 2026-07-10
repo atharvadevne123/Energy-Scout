@@ -26,7 +26,9 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_restx import Api, Resource, fields
 from loguru import logger
-from marshmallow import Schema, ValidationError, fields as ma_fields, validate as ma_validate
+from marshmallow import Schema, ValidationError
+from marshmallow import fields as ma_fields
+from marshmallow import validate as ma_validate
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 
 # ─── App bootstrap ────────────────────────────────────────────────────────────
@@ -71,9 +73,9 @@ FORECAST_KWH_HISTOGRAM = Histogram(
 
 # ─── Demand tier thresholds ───────────────────────────────────────────────────
 
-TIER_CRITICAL = float(os.getenv("TIER_CRITICAL", "5000"))   # kWh peak
-TIER_HIGH     = float(os.getenv("TIER_HIGH",     "2000"))
-TIER_MEDIUM   = float(os.getenv("TIER_MEDIUM",    "500"))
+TIER_CRITICAL = float(os.getenv("TIER_CRITICAL", "5000"))  # kWh peak
+TIER_HIGH = float(os.getenv("TIER_HIGH", "2000"))
+TIER_MEDIUM = float(os.getenv("TIER_MEDIUM", "500"))
 
 # ─── Model loading ────────────────────────────────────────────────────────────
 
@@ -89,18 +91,21 @@ def _load_models() -> None:
     sys.path.insert(0, str(Path(__file__).parent.parent))
 
     import joblib
-    from models.ensemble.demand_forecaster import DemandForecaster
+
     from models.anomaly.consumption_anomaly import ConsumptionAnomalyDetector
+    from models.ensemble.demand_forecaster import DemandForecaster
 
     forecaster_path = MODEL_DIR / "ensemble" / "artifacts" / "demand_forecaster.joblib"
-    anomaly_path    = MODEL_DIR / "anomaly" / "artifacts" / "consumption_anomaly.joblib"
-    fe_path         = MODEL_DIR / "feature_engineer.joblib"
+    anomaly_path = MODEL_DIR / "anomaly" / "artifacts" / "consumption_anomaly.joblib"
+    fe_path = MODEL_DIR / "feature_engineer.joblib"
 
     if forecaster_path.exists():
         _forecaster = DemandForecaster.load(forecaster_path)
         logger.success("DemandForecaster loaded.")
     else:
-        logger.warning("Demand forecaster not found at {}. Using mock predictions.", forecaster_path)
+        logger.warning(
+            "Demand forecaster not found at {}. Using mock predictions.", forecaster_path
+        )
 
     if anomaly_path.exists():
         _anomaly_detector = ConsumptionAnomalyDetector.load(anomaly_path)
@@ -119,29 +124,26 @@ _BUILDING_TYPES = {"residential", "commercial", "industrial", "data_center"}
 
 
 class ForecastSchema(Schema):
-    meter_id              = ma_fields.Str(required=True)
-    building_type         = ma_fields.Str(
+    meter_id = ma_fields.Str(required=True)
+    building_type = ma_fields.Str(
         required=True,
         validate=ma_validate.OneOf(list(_BUILDING_TYPES)),
     )
-    timestamp             = ma_fields.Str(required=True)
-    temperature_c         = ma_fields.Float(load_default=None)
-    humidity_pct          = ma_fields.Float(
+    timestamp = ma_fields.Str(required=True)
+    temperature_c = ma_fields.Float(load_default=None)
+    humidity_pct = ma_fields.Float(
         load_default=None,
         validate=ma_validate.Range(min=0, max=100, error="humidity_pct must be 0–100"),
     )
-    occupancy_rate        = ma_fields.Float(
+    occupancy_rate = ma_fields.Float(
         load_default=None,
         validate=ma_validate.Range(min=0, max=1, error="occupancy_rate must be 0–1"),
     )
-    day_of_week           = ma_fields.Int(load_default=None,
-                                validate=ma_validate.Range(min=0, max=6))
-    hour                  = ma_fields.Int(load_default=None,
-                                validate=ma_validate.Range(min=0, max=23))
-    month                 = ma_fields.Int(load_default=None,
-                                validate=ma_validate.Range(min=1, max=12))
-    is_holiday            = ma_fields.Bool(load_default=False)
-    solar_generation_kw   = ma_fields.Float(
+    day_of_week = ma_fields.Int(load_default=None, validate=ma_validate.Range(min=0, max=6))
+    hour = ma_fields.Int(load_default=None, validate=ma_validate.Range(min=0, max=23))
+    month = ma_fields.Int(load_default=None, validate=ma_validate.Range(min=1, max=12))
+    is_holiday = ma_fields.Bool(load_default=False)
+    solar_generation_kw = ma_fields.Float(
         load_default=0.0,
         validate=ma_validate.Range(min=0, error="solar_generation_kw must be >= 0"),
     )
@@ -152,72 +154,85 @@ class ForecastSchema(Schema):
 
 
 class AnomalySchema(Schema):
-    meter_id         = ma_fields.Str(required=True)
-    timestamp        = ma_fields.Str(required=True)
-    consumption_kwh  = ma_fields.Float(
+    meter_id = ma_fields.Str(required=True)
+    timestamp = ma_fields.Str(required=True)
+    consumption_kwh = ma_fields.Float(
         required=True,
         validate=ma_validate.Range(min=0, error="consumption_kwh must be >= 0"),
     )
-    expected_kwh     = ma_fields.Float(load_default=None)
-    building_type    = ma_fields.Str(
+    expected_kwh = ma_fields.Float(load_default=None)
+    building_type = ma_fields.Str(
         load_default="commercial",
         validate=ma_validate.OneOf(list(_BUILDING_TYPES)),
     )
-    temperature_c    = ma_fields.Float(load_default=None)
+    temperature_c = ma_fields.Float(load_default=None)
 
 
-_forecast_schema       = ForecastSchema()
+_forecast_schema = ForecastSchema()
 _forecast_batch_schema = ForecastSchema(many=True)
-_anomaly_schema        = AnomalySchema()
+_anomaly_schema = AnomalySchema()
 
 # ─── Swagger models ───────────────────────────────────────────────────────────
 
-forecast_input_model = api.model("ForecastInput", {
-    "meter_id":               fields.String(required=True, example="MTR-001"),
-    "building_type":          fields.String(required=True, example="commercial"),
-    "timestamp":              fields.String(required=True, example="2024-06-15T14:00:00"),
-    "temperature_c":          fields.Float(example=22.5),
-    "humidity_pct":           fields.Float(example=55.0),
-    "occupancy_rate":         fields.Float(example=0.8),
-    "day_of_week":            fields.Integer(example=1),
-    "hour":                   fields.Integer(example=14),
-    "month":                  fields.Integer(example=6),
-    "is_holiday":             fields.Boolean(example=False),
-    "solar_generation_kw":    fields.Float(example=12.5),
-    "forecast_horizon_hours": fields.Integer(example=24),
-})
+forecast_input_model = api.model(
+    "ForecastInput",
+    {
+        "meter_id": fields.String(required=True, example="MTR-001"),
+        "building_type": fields.String(required=True, example="commercial"),
+        "timestamp": fields.String(required=True, example="2024-06-15T14:00:00"),
+        "temperature_c": fields.Float(example=22.5),
+        "humidity_pct": fields.Float(example=55.0),
+        "occupancy_rate": fields.Float(example=0.8),
+        "day_of_week": fields.Integer(example=1),
+        "hour": fields.Integer(example=14),
+        "month": fields.Integer(example=6),
+        "is_holiday": fields.Boolean(example=False),
+        "solar_generation_kw": fields.Float(example=12.5),
+        "forecast_horizon_hours": fields.Integer(example=24),
+    },
+)
 
-forecast_response_model = api.model("ForecastResponse", {
-    "request_id":          fields.String(),
-    "meter_id":            fields.String(),
-    "forecast_kwh":        fields.List(fields.Float()),
-    "confidence_interval": fields.Raw(),
-    "peak_demand_kwh":     fields.Float(),
-    "demand_tier":         fields.String(),
-    "forecast_horizon_hours": fields.Integer(),
-    "latency_ms":          fields.Float(),
-})
+forecast_response_model = api.model(
+    "ForecastResponse",
+    {
+        "request_id": fields.String(),
+        "meter_id": fields.String(),
+        "forecast_kwh": fields.List(fields.Float()),
+        "confidence_interval": fields.Raw(),
+        "peak_demand_kwh": fields.Float(),
+        "demand_tier": fields.String(),
+        "forecast_horizon_hours": fields.Integer(),
+        "latency_ms": fields.Float(),
+    },
+)
 
-anomaly_input_model = api.model("AnomalyInput", {
-    "meter_id":        fields.String(required=True, example="MTR-001"),
-    "timestamp":       fields.String(required=True, example="2024-06-15T14:00:00"),
-    "consumption_kwh": fields.Float(required=True, example=750.5),
-    "expected_kwh":    fields.Float(example=500.0),
-    "building_type":   fields.String(example="commercial"),
-    "temperature_c":   fields.Float(example=22.5),
-})
+anomaly_input_model = api.model(
+    "AnomalyInput",
+    {
+        "meter_id": fields.String(required=True, example="MTR-001"),
+        "timestamp": fields.String(required=True, example="2024-06-15T14:00:00"),
+        "consumption_kwh": fields.Float(required=True, example=750.5),
+        "expected_kwh": fields.Float(example=500.0),
+        "building_type": fields.String(example="commercial"),
+        "temperature_c": fields.Float(example=22.5),
+    },
+)
 
-anomaly_response_model = api.model("AnomalyResponse", {
-    "request_id":    fields.String(),
-    "meter_id":      fields.String(),
-    "is_anomaly":    fields.Boolean(),
-    "anomaly_score": fields.Float(),
-    "anomaly_type":  fields.String(),
-    "z_score":       fields.Float(),
-    "latency_ms":    fields.Float(),
-})
+anomaly_response_model = api.model(
+    "AnomalyResponse",
+    {
+        "request_id": fields.String(),
+        "meter_id": fields.String(),
+        "is_anomaly": fields.Boolean(),
+        "anomaly_score": fields.Float(),
+        "anomaly_type": fields.String(),
+        "z_score": fields.Float(),
+        "latency_ms": fields.Float(),
+    },
+)
 
 # ─── Request ID middleware ────────────────────────────────────────────────────
+
 
 @app.before_request
 def _attach_request_id():
@@ -232,12 +247,14 @@ def _add_request_id_header(response):
 
 # ─── Rate limit exemptions ────────────────────────────────────────────────────
 
+
 @limiter.request_filter
 def _exempt_observability():
     return request.path in ("/health", "/metrics") or request.path.startswith("/docs")
 
 
 # ─── Error handlers ───────────────────────────────────────────────────────────
+
 
 @api.errorhandler(Exception)
 def handle_generic(e):
@@ -257,6 +274,7 @@ def rate_limit_exceeded(e):
 
 # ─── Core forecast logic ──────────────────────────────────────────────────────
 
+
 def _run_forecast(data: dict) -> dict:
     """Produce energy forecast from a validated request dict."""
     start = time.perf_counter()
@@ -275,18 +293,19 @@ def _run_forecast(data: dict) -> dict:
     if _forecaster is not None:
         forecast_result = _forecaster.forecast(X, horizon=horizon)
         forecast_kwh = forecast_result["forecast_kwh"]
-        lower_kwh    = forecast_result["lower_kwh"]
-        upper_kwh    = forecast_result["upper_kwh"]
-        peak_demand  = forecast_result["peak_demand_kwh"]
+        lower_kwh = forecast_result["lower_kwh"]
+        upper_kwh = forecast_result["upper_kwh"]
+        peak_demand = forecast_result["peak_demand_kwh"]
     else:
         # Mock fallback: realistic building-type defaults
         base = {"residential": 250, "commercial": 500, "industrial": 2000, "data_center": 3000}
         base_kw = base.get(data.get("building_type", "commercial"), 500)
         import random
+
         forecast_kwh = [round(base_kw + random.uniform(-50, 50), 2) for _ in range(horizon)]
-        lower_kwh    = [round(v * 0.85, 2) for v in forecast_kwh]
-        upper_kwh    = [round(v * 1.15, 2) for v in forecast_kwh]
-        peak_demand  = max(forecast_kwh)
+        lower_kwh = [round(v * 0.85, 2) for v in forecast_kwh]
+        upper_kwh = [round(v * 1.15, 2) for v in forecast_kwh]
+        peak_demand = max(forecast_kwh)
 
     demand_tier = _compute_demand_tier(peak_demand)
     FORECAST_KWH_HISTOGRAM.observe(peak_demand)
@@ -295,17 +314,17 @@ def _run_forecast(data: dict) -> dict:
     REQUEST_COUNT.labels(endpoint="forecast", status="200").inc()
 
     return {
-        "request_id":   getattr(g, "request_id", str(uuid.uuid4())),
-        "meter_id":     meter_id,
+        "request_id": getattr(g, "request_id", str(uuid.uuid4())),
+        "meter_id": meter_id,
         "forecast_kwh": forecast_kwh,
         "confidence_interval": {
             "lower_kwh": lower_kwh,
             "upper_kwh": upper_kwh,
         },
-        "peak_demand_kwh":     round(peak_demand, 3),
-        "demand_tier":         demand_tier,
+        "peak_demand_kwh": round(peak_demand, 3),
+        "demand_tier": demand_tier,
         "forecast_horizon_hours": horizon,
-        "latency_ms":          round(latency_ms, 2),
+        "latency_ms": round(latency_ms, 2),
     }
 
 
@@ -313,28 +332,32 @@ def _run_anomaly(data: dict) -> dict:
     """Run anomaly detection on a meter reading."""
     start = time.perf_counter()
 
-    reading_df = pd.DataFrame([{
-        "consumption_kwh": data["consumption_kwh"],
-        "expected_kwh":    data.get("expected_kwh", data["consumption_kwh"]),
-        "temperature_c":   data.get("temperature_c", 20.0),
-        "building_type":   data.get("building_type", "commercial"),
-    }])
+    reading_df = pd.DataFrame(
+        [
+            {
+                "consumption_kwh": data["consumption_kwh"],
+                "expected_kwh": data.get("expected_kwh", data["consumption_kwh"]),
+                "temperature_c": data.get("temperature_c", 20.0),
+                "building_type": data.get("building_type", "commercial"),
+            }
+        ]
+    )
 
     if _anomaly_detector is not None:
         results = _anomaly_detector.detect(reading_df)
         r = results[0]
         anomaly_score = r["anomaly_score"]
-        is_anomaly    = r["is_anomaly"]
-        anomaly_type  = r["anomaly_type"]
-        z_score       = r["z_score"]
+        is_anomaly = r["is_anomaly"]
+        anomaly_type = r["anomaly_type"]
+        z_score = r["z_score"]
     else:
         # Mock fallback
         consumption = data["consumption_kwh"]
-        expected    = data.get("expected_kwh", consumption)
-        ratio       = consumption / expected if expected > 0 else 1.0
+        expected = data.get("expected_kwh", consumption)
+        ratio = consumption / expected if expected > 0 else 1.0
         anomaly_score = min(abs(ratio - 1.0), 1.0)
-        is_anomaly    = anomaly_score > 0.3
-        z_score       = (consumption - expected) / max(expected * 0.1, 1.0)
+        is_anomaly = anomaly_score > 0.3
+        z_score = (consumption - expected) / max(expected * 0.1, 1.0)
         if is_anomaly:
             if ratio > 1.5:
                 anomaly_type = "spike"
@@ -349,13 +372,13 @@ def _run_anomaly(data: dict) -> dict:
     REQUEST_COUNT.labels(endpoint="anomaly", status="200").inc()
 
     return {
-        "request_id":   getattr(g, "request_id", str(uuid.uuid4())),
-        "meter_id":     data.get("meter_id"),
-        "is_anomaly":   bool(is_anomaly),
+        "request_id": getattr(g, "request_id", str(uuid.uuid4())),
+        "meter_id": data.get("meter_id"),
+        "is_anomaly": bool(is_anomaly),
         "anomaly_score": round(float(anomaly_score), 6),
         "anomaly_type": anomaly_type,
-        "z_score":      round(float(z_score), 4),
-        "latency_ms":   round(latency_ms, 2),
+        "z_score": round(float(z_score), 4),
+        "latency_ms": round(latency_ms, 2),
     }
 
 
@@ -371,13 +394,14 @@ def _compute_demand_tier(peak_kwh: float) -> str:
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
 
+
 @ns.route("/health")
 class HealthCheck(Resource):
     def get(self):
         return {
             "status": "ok",
             "models_loaded": {
-                "forecaster":       _forecaster is not None,
+                "forecaster": _forecaster is not None,
                 "anomaly_detector": _anomaly_detector is not None,
             },
         }, 200
@@ -387,6 +411,7 @@ class HealthCheck(Resource):
 class Metrics(Resource):
     def get(self):
         from flask import Response
+
         return Response(generate_latest(), mimetype=CONTENT_TYPE_LATEST)
 
 
@@ -394,12 +419,12 @@ class Metrics(Resource):
 class ModelInfo(Resource):
     def get(self):
         return {
-            "version":              "1.0.0",
-            "forecaster_loaded":    _forecaster is not None,
-            "anomaly_loaded":       _anomaly_detector is not None,
-            "feature_engineer":     _feature_engineer is not None,
-            "supported_horizons":   "1–168 hours",
-            "building_types":       list(_BUILDING_TYPES),
+            "version": "1.0.0",
+            "forecaster_loaded": _forecaster is not None,
+            "anomaly_loaded": _anomaly_detector is not None,
+            "feature_engineer": _feature_engineer is not None,
+            "supported_horizons": "1–168 hours",
+            "building_types": list(_BUILDING_TYPES),
         }, 200
 
 
@@ -476,10 +501,10 @@ class EfficiencyRecommendations(Resource):
 
         REQUEST_COUNT.labels(endpoint="efficiency", status="200").inc()
         return {
-            "building_id":     building_id,
-            "period":          period,
+            "building_id": building_id,
+            "period": period,
             "recommendations": recommendations,
-            "generated_at":    pd.Timestamp.utcnow().isoformat(),
+            "generated_at": pd.Timestamp.utcnow().isoformat(),
         }, 200
 
 
@@ -523,16 +548,16 @@ class CostEstimate(Resource):
 
     def post(self):
         body = request.get_json(force=True) or {}
-        forecast_kwh  = body.get("forecast_kwh")
-        rate_per_kwh  = body.get("rate_per_kwh", 0.12)   # default USD/kWh
-        currency      = body.get("currency", "USD")
-        tariff        = body.get("tariff", "flat")        # flat | time_of_use | tiered
+        forecast_kwh = body.get("forecast_kwh")
+        rate_per_kwh = body.get("rate_per_kwh", 0.12)  # default USD/kWh
+        currency = body.get("currency", "USD")
+        tariff = body.get("tariff", "flat")  # flat | time_of_use | tiered
 
         if not forecast_kwh or not isinstance(forecast_kwh, list):
             return {"error": "'forecast_kwh' must be a list of hourly values."}, 400
 
         kwh_list = [float(v) for v in forecast_kwh]
-        rate     = float(rate_per_kwh)
+        rate = float(rate_per_kwh)
 
         # Time-of-use pricing: 1.6× peak (8 AM-8 PM), 0.75× off-peak
         if tariff == "time_of_use":
@@ -552,21 +577,21 @@ class CostEstimate(Resource):
         else:  # flat
             hourly_costs = [round(v * rate, 4) for v in kwh_list]
 
-        total_kwh  = round(sum(kwh_list), 2)
+        total_kwh = round(sum(kwh_list), 2)
         total_cost = round(sum(hourly_costs), 4)
-        peak_hour  = int(kwh_list.index(max(kwh_list)))
+        peak_hour = int(kwh_list.index(max(kwh_list)))
 
         REQUEST_COUNT.labels(endpoint="cost_estimate", status="200").inc()
         return {
-            "total_kwh":        total_kwh,
-            "total_cost":       total_cost,
-            "currency":         currency,
-            "rate_per_kwh":     rate,
-            "tariff":           tariff,
-            "peak_hour":        peak_hour,
-            "peak_kwh":         round(max(kwh_list), 2),
-            "avg_hourly_cost":  round(total_cost / len(hourly_costs), 4),
-            "hourly_costs":     hourly_costs,
+            "total_kwh": total_kwh,
+            "total_cost": total_cost,
+            "currency": currency,
+            "rate_per_kwh": rate,
+            "tariff": tariff,
+            "peak_hour": peak_hour,
+            "peak_kwh": round(max(kwh_list), 2),
+            "avg_hourly_cost": round(total_cost / len(hourly_costs), 4),
+            "hourly_costs": hourly_costs,
         }, 200
 
 
@@ -576,45 +601,45 @@ class CarbonFootprint(Resource):
 
     # Average grid emission factors (kg CO2e / kWh) by region
     _GRID_FACTORS = {
-        "US":     0.386,
-        "EU":     0.233,
-        "UK":     0.193,
-        "IN":     0.708,
-        "CN":     0.555,
-        "AU":     0.656,
-        "CA":     0.130,
-        "BR":     0.074,
+        "US": 0.386,
+        "EU": 0.233,
+        "UK": 0.193,
+        "IN": 0.708,
+        "CN": 0.555,
+        "AU": 0.656,
+        "CA": 0.130,
+        "BR": 0.074,
         "GLOBAL": 0.475,
     }
 
     def post(self):
-        body           = request.get_json(force=True) or {}
-        total_kwh      = body.get("total_kwh")
-        solar_kwh      = float(body.get("solar_kwh", 0))
-        grid_region    = body.get("grid_region", "US").upper()
+        body = request.get_json(force=True) or {}
+        total_kwh = body.get("total_kwh")
+        solar_kwh = float(body.get("solar_kwh", 0))
+        grid_region = body.get("grid_region", "US").upper()
 
         if total_kwh is None or float(total_kwh) < 0:
             return {"error": "'total_kwh' must be a non-negative number."}, 400
 
         total_kwh = float(total_kwh)
-        net_kwh   = max(0.0, total_kwh - solar_kwh)
-        factor    = self._GRID_FACTORS.get(grid_region, self._GRID_FACTORS["GLOBAL"])
+        net_kwh = max(0.0, total_kwh - solar_kwh)
+        factor = self._GRID_FACTORS.get(grid_region, self._GRID_FACTORS["GLOBAL"])
 
-        co2_kg    = round(net_kwh * factor, 3)
+        co2_kg = round(net_kwh * factor, 3)
         co2_saved = round(solar_kwh * factor, 3)
-        trees_eq  = round(co2_kg / 21.77, 2)   # 1 tree absorbs ~21.77 kg CO2/yr
+        trees_eq = round(co2_kg / 21.77, 2)  # 1 tree absorbs ~21.77 kg CO2/yr
 
         REQUEST_COUNT.labels(endpoint="carbon_footprint", status="200").inc()
         return {
-            "total_kwh":         total_kwh,
-            "solar_kwh":         solar_kwh,
-            "net_grid_kwh":      round(net_kwh, 2),
-            "grid_region":       grid_region,
-            "emission_factor":   factor,
-            "co2_kg":            co2_kg,
+            "total_kwh": total_kwh,
+            "solar_kwh": solar_kwh,
+            "net_grid_kwh": round(net_kwh, 2),
+            "grid_region": grid_region,
+            "emission_factor": factor,
+            "co2_kg": co2_kg,
             "co2_saved_by_solar_kg": co2_saved,
-            "trees_equivalent":  trees_eq,
-            "unit":              "kg CO2e",
+            "trees_equivalent": trees_eq,
+            "unit": "kg CO2e",
         }, 200
 
 

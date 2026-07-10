@@ -9,7 +9,6 @@ solar integration, and occupancy interaction features.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -18,11 +17,11 @@ from sklearn.base import BaseEstimator, TransformerMixin
 
 # US holidays (simplified static set — replace with `holidays` library in production)
 _US_FEDERAL_HOLIDAYS = {
-    (1, 1),   # New Year's Day
-    (7, 4),   # Independence Day
-    (11, 11), # Veterans Day
-    (12, 25), # Christmas
-    (12, 31), # New Year's Eve
+    (1, 1),  # New Year's Day
+    (7, 4),  # Independence Day
+    (11, 11),  # Veterans Day
+    (12, 25),  # Christmas
+    (12, 31),  # New Year's Eve
 }
 
 # Peak hours: 9 AM – 6 PM weekdays
@@ -162,10 +161,12 @@ class EnergyFeatureEngineer(BaseEstimator, TransformerMixin):
         if "is_holiday" not in df.columns:
             df["is_holiday"] = 0
             if "timestamp" in df.columns:
+
                 def _is_holiday(ts):
                     if pd.isna(ts):
                         return 0
                     return int((ts.month, ts.day) in _US_FEDERAL_HOLIDAYS)
+
                 df["is_holiday"] = df["timestamp"].apply(_is_holiday)
         else:
             df["is_holiday"] = df["is_holiday"].fillna(0).astype(int)
@@ -173,8 +174,8 @@ class EnergyFeatureEngineer(BaseEstimator, TransformerMixin):
         # Cyclical encoding for hour, day of week, month
         df["hour_sin"] = np.sin(2 * np.pi * hour / 24)
         df["hour_cos"] = np.cos(2 * np.pi * hour / 24)
-        df["dow_sin"]  = np.sin(2 * np.pi * dow / 7)
-        df["dow_cos"]  = np.cos(2 * np.pi * dow / 7)
+        df["dow_sin"] = np.sin(2 * np.pi * dow / 7)
+        df["dow_cos"] = np.cos(2 * np.pi * dow / 7)
         df["month_sin"] = np.sin(2 * np.pi * (month - 1) / 12)
         df["month_cos"] = np.cos(2 * np.pi * (month - 1) / 12)
 
@@ -198,14 +199,18 @@ class EnergyFeatureEngineer(BaseEstimator, TransformerMixin):
             df["humidity_pct"] = hum
 
             # Humidity buckets
-            hbins = pd.cut(hum, bins=_HUM_BINS, labels=_HUM_BIN_LABELS, right=True, include_lowest=True)
+            hbins = pd.cut(
+                hum, bins=_HUM_BINS, labels=_HUM_BIN_LABELS, right=True, include_lowest=True
+            )
             for label in _HUM_BIN_LABELS:
                 df[f"hum_bucket_{label}"] = (hbins == label).astype(int)
 
             # Feels-like approximation (Heat Index simplified)
             if "temperature_c" in df.columns:
                 temp = df["temperature_c"].fillna(_BASE_TEMP_C)
-                df["feels_like_c"] = temp + 0.33 * (hum / 100 * 6.105 * np.exp(17.27 * temp / (237.7 + temp))) - 4.0
+                df["feels_like_c"] = (
+                    temp + 0.33 * (hum / 100 * 6.105 * np.exp(17.27 * temp / (237.7 + temp))) - 4.0
+                )
 
         return df
 
@@ -254,9 +259,9 @@ class EnergyFeatureEngineer(BaseEstimator, TransformerMixin):
         if "occupancy_rate" not in df.columns:
             df["occupancy_rate"] = 1.0
         if "consumption_kwh" in df.columns:
-            df["consumption_x_occupancy"] = (
-                df["consumption_kwh"] * df["occupancy_rate"].clip(0, 1).fillna(1.0)
-            )
+            df["consumption_x_occupancy"] = df["consumption_kwh"] * df["occupancy_rate"].clip(
+                0, 1
+            ).fillna(1.0)
         return df
 
     @property
@@ -288,49 +293,43 @@ def build_forecast_features(request_data: dict) -> pd.DataFrame:
     is_holiday = int(request_data.get("is_holiday", False))
 
     row = {
-        "hour":        hour,
+        "hour": hour,
         "day_of_week": dow,
-        "month":       month,
-        "quarter":     (month - 1) // 3 + 1,
-        "is_weekend":  int(dow >= 5),
-        "is_weekday":  int(dow < 5),
+        "month": month,
+        "quarter": (month - 1) // 3 + 1,
+        "is_weekend": int(dow >= 5),
+        "is_weekday": int(dow < 5),
         "is_peak_hour": int(_PEAK_START <= hour < _PEAK_END and dow < 5),
-        "is_holiday":  is_holiday,
-
+        "is_holiday": is_holiday,
         # Cyclical encodings
-        "hour_sin":   float(np.sin(2 * np.pi * hour / 24)),
-        "hour_cos":   float(np.cos(2 * np.pi * hour / 24)),
-        "dow_sin":    float(np.sin(2 * np.pi * dow / 7)),
-        "dow_cos":    float(np.cos(2 * np.pi * dow / 7)),
-        "month_sin":  float(np.sin(2 * np.pi * (month - 1) / 12)),
-        "month_cos":  float(np.cos(2 * np.pi * (month - 1) / 12)),
-
+        "hour_sin": float(np.sin(2 * np.pi * hour / 24)),
+        "hour_cos": float(np.cos(2 * np.pi * hour / 24)),
+        "dow_sin": float(np.sin(2 * np.pi * dow / 7)),
+        "dow_cos": float(np.cos(2 * np.pi * dow / 7)),
+        "month_sin": float(np.sin(2 * np.pi * (month - 1) / 12)),
+        "month_cos": float(np.cos(2 * np.pi * (month - 1) / 12)),
         # Weather
         "temperature_c": temp,
-        "humidity_pct":  hum,
-        "hdd":           max(0.0, _BASE_TEMP_C - temp),
-        "cdd":           max(0.0, temp - _BASE_TEMP_C),
+        "humidity_pct": hum,
+        "hdd": max(0.0, _BASE_TEMP_C - temp),
+        "cdd": max(0.0, temp - _BASE_TEMP_C),
         "solar_generation_kw": solar,
         "occupancy_rate": occupancy,
-
         # Building type one-hot
         **{f"building_{bt}": int(building_type == bt) for bt in _BUILDING_TYPES},
-
         # Placeholder lag features (zero-filled at inference without history)
         **{f"consumption_lag_{lag}h": 0.0 for lag in [1, 2, 24, 168]},
-
         # Placeholder rolling features
         "rolling_mean_24h": 0.0,
-        "rolling_std_24h":  0.0,
+        "rolling_std_24h": 0.0,
         "rolling_mean_168h": 0.0,
-        "rolling_std_168h":  0.0,
-        "rolling_mean_30d":  0.0,
-        "rolling_std_30d":   0.0,
-        "rolling_max_24h":   0.0,
-        "rolling_min_24h":   0.0,
-
+        "rolling_std_168h": 0.0,
+        "rolling_mean_30d": 0.0,
+        "rolling_std_30d": 0.0,
+        "rolling_max_24h": 0.0,
+        "rolling_min_24h": 0.0,
         # Interaction features
-        "net_consumption_kwh":     0.0,
+        "net_consumption_kwh": 0.0,
         "consumption_x_occupancy": 0.0,
     }
 

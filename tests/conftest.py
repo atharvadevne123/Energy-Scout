@@ -1,15 +1,18 @@
 from __future__ import annotations
 
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 
 
 @pytest.fixture
 def client():
     import sys
     from pathlib import Path
+
     sys.path.insert(0, str(Path(__file__).parent.parent))
     from api.app import app
+
     app.config["TESTING"] = True
     with app.test_client() as c:
         yield c
@@ -23,11 +26,13 @@ def patch_models(monkeypatch):
     _kwh = [480.0 + i * 10 for i in range(24)]
     mock_forecaster.forecast.return_value = {
         "forecast_kwh": _kwh,
-        "lower_kwh":    [v * 0.85 for v in _kwh],
-        "upper_kwh":    [v * 1.15 for v in _kwh],
+        "lower_kwh": [v * 0.85 for v in _kwh],
+        "upper_kwh": [v * 1.15 for v in _kwh],
         "peak_demand_kwh": max(_kwh),
     }
-    mock_forecaster.explain.return_value = [{"shap_features": {"hour": 0.18, "temperature_c": 0.14}}]
+    mock_forecaster.explain.return_value = [
+        {"shap_features": {"hour": 0.18, "temperature_c": 0.14}}
+    ]
 
     mock_anomaly = MagicMock()
     mock_anomaly.detect.return_value = [

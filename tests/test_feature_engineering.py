@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-import numpy as np
+
 import pandas as pd
 import pytest
 
@@ -12,24 +12,40 @@ from pipeline.feature_engineering import EnergyFeatureEngineer
 
 @pytest.fixture
 def sample_df():
-    return pd.DataFrame([
-        {
-            "meter_id": "MTR-001", "building_type": "commercial",
-            "timestamp": "2024-06-17T09:00:00", "temperature_c": 22.5,
-            "humidity_pct": 55.0, "occupancy_rate": 0.85, "day_of_week": 0,
-            "hour": 9, "month": 6, "is_holiday": False,
-            "solar_generation_kw": 15.0, "forecast_horizon_hours": 24,
-            "consumption_kwh": 480.0,
-        },
-        {
-            "meter_id": "MTR-002", "building_type": "residential",
-            "timestamp": "2024-01-10T22:00:00", "temperature_c": -5.0,
-            "humidity_pct": 70.0, "occupancy_rate": 0.9, "day_of_week": 2,
-            "hour": 22, "month": 1, "is_holiday": False,
-            "solar_generation_kw": 0.0, "forecast_horizon_hours": 24,
-            "consumption_kwh": 320.0,
-        },
-    ])
+    return pd.DataFrame(
+        [
+            {
+                "meter_id": "MTR-001",
+                "building_type": "commercial",
+                "timestamp": "2024-06-17T09:00:00",
+                "temperature_c": 22.5,
+                "humidity_pct": 55.0,
+                "occupancy_rate": 0.85,
+                "day_of_week": 0,
+                "hour": 9,
+                "month": 6,
+                "is_holiday": False,
+                "solar_generation_kw": 15.0,
+                "forecast_horizon_hours": 24,
+                "consumption_kwh": 480.0,
+            },
+            {
+                "meter_id": "MTR-002",
+                "building_type": "residential",
+                "timestamp": "2024-01-10T22:00:00",
+                "temperature_c": -5.0,
+                "humidity_pct": 70.0,
+                "occupancy_rate": 0.9,
+                "day_of_week": 2,
+                "hour": 22,
+                "month": 1,
+                "is_holiday": False,
+                "solar_generation_kw": 0.0,
+                "forecast_horizon_hours": 24,
+                "consumption_kwh": 320.0,
+            },
+        ]
+    )
 
 
 class TestEnergyFeatureEngineer:
@@ -43,8 +59,8 @@ class TestEnergyFeatureEngineer:
         fe = EnergyFeatureEngineer()
         result = fe.fit_transform(sample_df)
         assert "is_peak_hour" in result.columns
-        assert result["is_peak_hour"].iloc[0] == 1   # hour=9 is peak
-        assert result["is_peak_hour"].iloc[1] == 0   # hour=22 is off-peak
+        assert result["is_peak_hour"].iloc[0] == 1  # hour=9 is peak
+        assert result["is_peak_hour"].iloc[1] == 0  # hour=22 is off-peak
 
     def test_is_weekend_feature(self, sample_df):
         fe = EnergyFeatureEngineer()

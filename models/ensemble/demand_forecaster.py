@@ -14,13 +14,13 @@ from pathlib import Path
 from typing import Optional
 
 import joblib
+import lightgbm as lgb
+import mlflow
+import mlflow.sklearn
 import numpy as np
 import pandas as pd
 import shap
 import xgboost as xgb
-import lightgbm as lgb
-import mlflow
-import mlflow.sklearn
 from loguru import logger
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 from sklearn.preprocessing import StandardScaler
@@ -73,8 +73,16 @@ class DemandForecaster:
         )
 
         # Quantile models for lower / upper confidence bounds
-        xgb_lower_params = {**xgb_defaults, "objective": "reg:quantileerror", "quantile_alpha": quantile_alpha}
-        xgb_upper_params = {**xgb_defaults, "objective": "reg:quantileerror", "quantile_alpha": 1 - quantile_alpha}
+        xgb_lower_params = {
+            **xgb_defaults,
+            "objective": "reg:quantileerror",
+            "quantile_alpha": quantile_alpha,
+        }
+        xgb_upper_params = {
+            **xgb_defaults,
+            "objective": "reg:quantileerror",
+            "quantile_alpha": 1 - quantile_alpha,
+        }
         lgb_lower_params = {**lgb_defaults, "objective": "quantile", "alpha": quantile_alpha}
         lgb_upper_params = {**lgb_defaults, "objective": "quantile", "alpha": 1 - quantile_alpha}
 
@@ -119,7 +127,9 @@ class DemandForecaster:
 
         logger.info("Training DemandForecaster on {:,} samples.", len(y_arr))
 
-        run_ctx = mlflow.start_run(run_name="energy_demand_forecast") if mlflow_run else _NullContext()
+        run_ctx = (
+            mlflow.start_run(run_name="energy_demand_forecast") if mlflow_run else _NullContext()
+        )
         with run_ctx:
             # Fit central models
             self.xgb_model.fit(X_arr, y_arr)
@@ -134,18 +144,24 @@ class DemandForecaster:
             if mlflow_run:
                 train_pred = self._predict_raw(X_arr)
                 mlflow.log_metric("train_mae", mean_absolute_error(y_arr, train_pred))
-                mlflow.log_metric("train_rmse", float(np.sqrt(mean_squared_error(y_arr, train_pred))))
-                mlflow.log_params({
-                    "n_estimators_xgb": self.xgb_model.n_estimators,
-                    "n_estimators_lgb": self.lgb_model.n_estimators,
-                    "quantile_alpha": self.quantile_alpha,
-                })
+                mlflow.log_metric(
+                    "train_rmse", float(np.sqrt(mean_squared_error(y_arr, train_pred)))
+                )
+                mlflow.log_params(
+                    {
+                        "n_estimators_xgb": self.xgb_model.n_estimators,
+                        "n_estimators_lgb": self.lgb_model.n_estimators,
+                        "quantile_alpha": self.quantile_alpha,
+                    }
+                )
 
                 if eval_X is not None and eval_y is not None:
                     eval_arr = self.scaler.transform(eval_X.values)
                     val_pred = self._predict_raw(eval_arr)
                     mlflow.log_metric("val_mae", mean_absolute_error(eval_y.values, val_pred))
-                    mlflow.log_metric("val_rmse", float(np.sqrt(mean_squared_error(eval_y.values, val_pred))))
+                    mlflow.log_metric(
+                        "val_rmse", float(np.sqrt(mean_squared_error(eval_y.values, val_pred)))
+                    )
                     logger.info("Val MAE: {:.4f}", mean_absolute_error(eval_y.values, val_pred))
 
         # Build SHAP explainer on the XGBoost central model
@@ -205,8 +221,8 @@ class DemandForecaster:
 
         return {
             "forecast_kwh": [round(float(v), 3) for v in point],
-            "lower_kwh":    [round(float(v), 3) for v in lower],
-            "upper_kwh":    [round(float(v), 3) for v in upper],
+            "lower_kwh": [round(float(v), 3) for v in lower],
+            "upper_kwh": [round(float(v), 3) for v in upper],
             "peak_demand_kwh": round(float(np.max(point)), 3),
         }
 
@@ -220,13 +236,14 @@ class DemandForecaster:
         results = []
         for i in range(len(X)):
             top_idx = np.argsort(np.abs(shap_values[i]))[::-1][:max_display]
-            results.append({
-                "shap_values": {
-                    self.feature_names[j]: round(float(shap_values[i][j]), 6)
-                    for j in top_idx
-                },
-                "base_value": round(float(self._shap_explainer.expected_value), 6),
-            })
+            results.append(
+                {
+                    "shap_values": {
+                        self.feature_names[j]: round(float(shap_values[i][j]), 6) for j in top_idx
+                    },
+                    "base_value": round(float(self._shap_explainer.expected_value), 6),
+                }
+            )
         return results
 
     # ------------------------------------------------------------------

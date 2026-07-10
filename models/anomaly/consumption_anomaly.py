@@ -23,20 +23,20 @@ ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
 
 # Per-building-type contamination rates
 _CONTAMINATION = {
-    "residential":  0.03,
-    "commercial":   0.04,
-    "industrial":   0.05,
-    "data_center":  0.02,
-    "default":      0.04,
+    "residential": 0.03,
+    "commercial": 0.04,
+    "industrial": 0.05,
+    "data_center": 0.02,
+    "default": 0.04,
 }
 
 # Z-score threshold map per building type
 _ZSCORE_THRESHOLDS = {
-    "residential":  2.8,
-    "commercial":   3.0,
-    "industrial":   3.5,
-    "data_center":  4.0,
-    "default":      3.0,
+    "residential": 2.8,
+    "commercial": 3.0,
+    "industrial": 3.5,
+    "data_center": 4.0,
+    "default": 3.0,
 }
 
 
@@ -103,7 +103,8 @@ class ConsumptionAnomalyDetector:
         self._fitted = True
         logger.success(
             "ConsumptionAnomalyDetector fitted on {:,} samples (building={}).",
-            len(df), self.building_type
+            len(df),
+            self.building_type,
         )
         return self
 
@@ -156,17 +157,21 @@ class ConsumptionAnomalyDetector:
             iso_anomaly = iso_anomaly_scores[idx] > 0.65
 
             # Combined score: weighted average
-            combined_score = 0.6 * float(iso_anomaly_scores[idx]) + 0.4 * min(abs(z_score) / (self.zscore_threshold * 2), 1.0)
+            combined_score = 0.6 * float(iso_anomaly_scores[idx]) + 0.4 * min(
+                abs(z_score) / (self.zscore_threshold * 2), 1.0
+            )
             is_anomaly = zscore_anomaly or iso_anomaly
 
             anomaly_type = self._classify_anomaly(consumption, expected, z_score, row)
 
-            results.append({
-                "anomaly_score": round(float(combined_score), 6),
-                "is_anomaly":    bool(is_anomaly),
-                "anomaly_type":  anomaly_type if is_anomaly else "none",
-                "z_score":       round(float(z_score), 4),
-            })
+            results.append(
+                {
+                    "anomaly_score": round(float(combined_score), 6),
+                    "is_anomaly": bool(is_anomaly),
+                    "anomaly_type": anomaly_type if is_anomaly else "none",
+                    "z_score": round(float(z_score), 4),
+                }
+            )
 
         return results
 
@@ -210,14 +215,21 @@ class ConsumptionAnomalyDetector:
     def _select_feature_cols(self, df: pd.DataFrame) -> list[str]:
         """Pick numeric columns suitable for anomaly detection."""
         priority = [
-            "consumption_kwh", "expected_kwh", "temperature_c",
-            "humidity_pct", "occupancy_rate", "solar_generation_kw",
-            "hour", "day_of_week", "month",
+            "consumption_kwh",
+            "expected_kwh",
+            "temperature_c",
+            "humidity_pct",
+            "occupancy_rate",
+            "solar_generation_kw",
+            "hour",
+            "day_of_week",
+            "month",
         ]
         available = [c for c in priority if c in df.columns]
         # Add remaining numeric columns not already included
         extra = [
-            c for c in df.select_dtypes(include="number").columns
+            c
+            for c in df.select_dtypes(include="number").columns
             if c not in available and c not in {"is_anomaly"}
         ]
         return available + extra

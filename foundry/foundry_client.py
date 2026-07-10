@@ -68,8 +68,8 @@ class FoundryClient:
         token: Optional[str] = None,
         timeout: int = DEFAULT_TIMEOUT,
     ):
-        self.host    = (host or os.getenv("FOUNDRY_HOST", "")).rstrip("/")
-        self._token  = token or os.getenv("FOUNDRY_TOKEN", "")
+        self.host = (host or os.getenv("FOUNDRY_HOST", "")).rstrip("/")
+        self._token = token or os.getenv("FOUNDRY_TOKEN", "")
         self.timeout = timeout
         self._session = _build_session()
 
@@ -78,9 +78,13 @@ class FoundryClient:
         if not self._token:
             logger.warning("FOUNDRY_TOKEN not set — Foundry calls will fail unless mocked.")
 
-    def upload_dataset(self, df: pd.DataFrame, dataset_rid: str, branch: str = "master") -> dict[str, Any]:
-        logger.info("Uploading {:,} rows to Foundry dataset {} (branch={}).", len(df), dataset_rid, branch)
-        txn     = self._open_transaction(dataset_rid, branch)
+    def upload_dataset(
+        self, df: pd.DataFrame, dataset_rid: str, branch: str = "master"
+    ) -> dict[str, Any]:
+        logger.info(
+            "Uploading {:,} rows to Foundry dataset {} (branch={}).", len(df), dataset_rid, branch
+        )
+        txn = self._open_transaction(dataset_rid, branch)
         txn_rid = txn["rid"]
         try:
             buf = io.BytesIO()
@@ -111,7 +115,7 @@ class FoundryClient:
 
     def register_model(self, model_metadata: dict[str, Any]) -> dict[str, Any]:
         required = {"name", "version", "framework"}
-        missing  = required - set(model_metadata)
+        missing = required - set(model_metadata)
         if missing:
             raise ValueError(f"model_metadata missing required keys: {missing}")
         payload = {
@@ -119,7 +123,9 @@ class FoundryClient:
             "registered_at": datetime.now(timezone.utc).isoformat(),
             "service": "energy-scout",
         }
-        logger.info("Registering model '{}' v{} in Foundry catalog.", payload["name"], payload["version"])
+        logger.info(
+            "Registering model '{}' v{} in Foundry catalog.", payload["name"], payload["version"]
+        )
         return self._post(f"{self.host}/api/v1/models", json=payload)
 
     def log_predictions(self, predictions_df: pd.DataFrame) -> dict[str, Any]:
@@ -159,8 +165,7 @@ class FoundryClient:
             for col, ratio in df.isna().mean().items():
                 if ratio > null_threshold:
                     issues.append(
-                        f"Column '{col}' has {ratio:.1%} nulls "
-                        f"(threshold {null_threshold:.1%})."
+                        f"Column '{col}' has {ratio:.1%} nulls (threshold {null_threshold:.1%})."
                     )
 
         result = {"passed": not issues, "issues": issues, "row_count": len(df)}
@@ -227,7 +232,9 @@ class FoundryClient:
 
         logger.success(
             "Streaming complete: {:,} rows in {} chunk(s) to {}.",
-            total_rows, chunks, dataset_rid,
+            total_rows,
+            chunks,
+            dataset_rid,
         )
         return {"rows": total_rows, "chunks": chunks, "dataset_rid": dataset_rid}
 
@@ -261,9 +268,7 @@ class FoundryClient:
             f"{self.host}/foundry-catalog/api/catalog/datasets/{dataset_rid}/subscriptions",
             json={"webhookUrl": webhook_url, "eventTypes": event_types},
         )
-        logger.success(
-            "Subscribed {} to {} for events {}.", webhook_url, dataset_rid, event_types
-        )
+        logger.success("Subscribed {} to {} for events {}.", webhook_url, dataset_rid, event_types)
         return resp
 
     def enforce_schema(
@@ -341,7 +346,10 @@ class FoundryClient:
 
         logger.success(
             "Exported {:,} rows from {} to {} ({}).",
-            len(df), dataset_rid, output_path, format,
+            len(df),
+            dataset_rid,
+            output_path,
+            format,
         )
         return output_path
 
@@ -360,9 +368,7 @@ class FoundryClient:
             "service": "energy-scout",
         }
         resp = self._post(f"{self.host}/foundry-metrics/api/metrics", json=payload)
-        logger.success(
-            "Pushed {} metric(s) to dashboard {}.", len(metrics_dict), dashboard_rid
-        )
+        logger.success("Pushed {} metric(s) to dashboard {}.", len(metrics_dict), dashboard_rid)
         return resp
 
     def health_check(self) -> dict[str, Any]:
@@ -407,7 +413,9 @@ class FoundryClient:
             self._executor = executor
         logger.info(
             "Scheduling async upload of {:,} rows to {} (branch={}).",
-            len(df), dataset_rid, branch,
+            len(df),
+            dataset_rid,
+            branch,
         )
         return executor.submit(self.upload_dataset, df, dataset_rid, branch)
 
@@ -438,14 +446,20 @@ class FoundryClient:
         return {"Authorization": f"Bearer {self._token}", "Content-Type": "application/json"}
 
     def _open_transaction(self, dataset_rid: str, branch: str) -> dict:
-        return self._post(f"{self.host}/api/v1/datasets/{dataset_rid}/transactions", json={"branchId": branch})
+        return self._post(
+            f"{self.host}/api/v1/datasets/{dataset_rid}/transactions", json={"branchId": branch}
+        )
 
     def _commit_transaction(self, dataset_rid: str, txn_rid: str) -> dict:
-        return self._post(f"{self.host}/api/v1/datasets/{dataset_rid}/transactions/{txn_rid}/commit", json={})
+        return self._post(
+            f"{self.host}/api/v1/datasets/{dataset_rid}/transactions/{txn_rid}/commit", json={}
+        )
 
     def _abort_transaction(self, dataset_rid: str, txn_rid: str) -> None:
         try:
-            self._post(f"{self.host}/api/v1/datasets/{dataset_rid}/transactions/{txn_rid}/abort", json={})
+            self._post(
+                f"{self.host}/api/v1/datasets/{dataset_rid}/transactions/{txn_rid}/abort", json={}
+            )
         except Exception as exc:
             logger.error("Failed to abort transaction {}: {}", txn_rid, exc)
 
@@ -464,8 +478,10 @@ class FoundryClient:
         return result.get("data", [])
 
     def _get_file(self, dataset_rid: str, branch: str, logical_path: str) -> bytes:
-        url  = f"{self.host}/api/v1/datasets/{dataset_rid}/files/{logical_path}/content?branchId={branch}"
-        resp = self._session.get(url, headers={"Authorization": f"Bearer {self._token}"}, timeout=self.timeout)
+        url = f"{self.host}/api/v1/datasets/{dataset_rid}/files/{logical_path}/content?branchId={branch}"
+        resp = self._session.get(
+            url, headers={"Authorization": f"Bearer {self._token}"}, timeout=self.timeout
+        )
         self._raise_for_status(resp, f"GET file {logical_path}")
         return resp.content
 
@@ -485,4 +501,6 @@ class FoundryClient:
     @staticmethod
     def _raise_for_status(resp: requests.Response, context: str = "") -> None:
         if not resp.ok:
-            raise FoundryError(f"Foundry API error [{context}]: HTTP {resp.status_code} — {resp.text[:500]}")
+            raise FoundryError(
+                f"Foundry API error [{context}]: HTTP {resp.status_code} — {resp.text[:500]}"
+            )

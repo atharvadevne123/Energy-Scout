@@ -33,6 +33,7 @@ def fetch_meter_data_from_foundry(**ctx):
     import os
     import sys
     from pathlib import Path
+
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
     from foundry.foundry_client import FoundryClient
 
@@ -52,28 +53,32 @@ def fetch_meter_data_from_foundry(**ctx):
 
 
 def check_drift(**ctx):
-    import pandas as pd
-    from pathlib import Path
     import sys
+    from pathlib import Path
+
+    import pandas as pd
+
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
     from monitoring.drift_monitor import DriftMonitor
 
     training_path = ctx["ti"].xcom_pull(key="training_data_path")
-    df  = pd.read_parquet(training_path)
+    df = pd.read_parquet(training_path)
     mid = len(df) // 2
 
     monitor = DriftMonitor(threshold=0.05)
-    report  = monitor.detect_drift(df.iloc[:mid], df.iloc[mid:])
+    report = monitor.detect_drift(df.iloc[:mid], df.iloc[mid:])
     drifted = [f for f, r in report.items() if r.get("drift_detected")]
     print(f"Drift check: {len(drifted)} features drifted out of {len(report)}.")
 
 
 def retrain_model(**ctx):
-    import pandas as pd
-    import joblib
     import json
-    from pathlib import Path
     import sys
+    from pathlib import Path
+
+    import joblib
+    import pandas as pd
+
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
     from models.ensemble.demand_forecaster import DemandForecaster
     from pipeline.feature_engineering import EnergyFeatureEngineer
@@ -107,23 +112,25 @@ def retrain_model(**ctx):
 
 
 def evaluate_model(**ctx):
-    import pandas as pd
     import json
-    from pathlib import Path
     import sys
+    from pathlib import Path
+
+    import pandas as pd
+
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
     from models.ensemble.demand_forecaster import DemandForecaster
 
-    model_dir     = Path(ctx["ti"].xcom_pull(key="model_dir"))
+    model_dir = Path(ctx["ti"].xcom_pull(key="model_dir"))
     training_path = ctx["ti"].xcom_pull(key="training_data_path")
 
-    model     = DemandForecaster.load(model_dir / "demand_forecaster.joblib")
-    df        = pd.read_parquet(training_path)
+    model = DemandForecaster.load(model_dir / "demand_forecaster.joblib")
+    df = pd.read_parquet(training_path)
     feat_cols = json.loads((model_dir / "feature_cols.json").read_text())
-    X         = df.reindex(columns=feat_cols, fill_value=0).fillna(0)
+    X = df.reindex(columns=feat_cols, fill_value=0).fillna(0)
 
     forecasts = model.forecast(X.head(100), horizon=1)
-    avg_kwh   = float(sum(forecasts) / len(forecasts)) if forecasts else 0.0
+    avg_kwh = float(sum(forecasts) / len(forecasts)) if forecasts else 0.0
     print(f"Evaluation — average 1-step forecast: {avg_kwh:.2f} kWh")
     ctx["ti"].xcom_push(key="avg_forecast_kwh", value=avg_kwh)
 
@@ -131,25 +138,32 @@ def evaluate_model(**ctx):
 def push_model_to_foundry(**ctx):
     import sys
     from pathlib import Path
+
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
     from foundry.foundry_client import FoundryClient
 
-    client      = FoundryClient()
-    avg_kwh     = ctx["ti"].xcom_pull(key="avg_forecast_kwh")
+    client = FoundryClient()
+    avg_kwh = ctx["ti"].xcom_pull(key="avg_forecast_kwh")
 
-    client.register_model({
-        "name":      "energy-scout-demand-forecaster",
-        "version":   datetime.utcnow().strftime("%Y%m%d_%H%M%S"),
-        "framework": "xgboost+lightgbm",
-        "metrics":   {"avg_forecast_kwh": avg_kwh},
-    })
+    client.register_model(
+        {
+            "name": "energy-scout-demand-forecaster",
+            "version": datetime.utcnow().strftime("%Y%m%d_%H%M%S"),
+            "framework": "xgboost+lightgbm",
+            "metrics": {"avg_forecast_kwh": avg_kwh},
+        }
+    )
     print("Energy-Scout model registered in Foundry catalog.")
 
 
-fetch_task   = PythonOperator(task_id="fetch_meter_data",        python_callable=fetch_meter_data_from_foundry, dag=dag)
-drift_task   = PythonOperator(task_id="check_drift",             python_callable=check_drift,                   dag=dag)
-retrain_task = PythonOperator(task_id="retrain_model",           python_callable=retrain_model,                 dag=dag)
-eval_task    = PythonOperator(task_id="evaluate_model",          python_callable=evaluate_model,                dag=dag)
-push_task    = PythonOperator(task_id="push_model_to_foundry",   python_callable=push_model_to_foundry,         dag=dag)
+fetch_task = PythonOperator(
+    task_id="fetch_meter_data", python_callable=fetch_meter_data_from_foundry, dag=dag
+)
+drift_task = PythonOperator(task_id="check_drift", python_callable=check_drift, dag=dag)
+retrain_task = PythonOperator(task_id="retrain_model", python_callable=retrain_model, dag=dag)
+eval_task = PythonOperator(task_id="evaluate_model", python_callable=evaluate_model, dag=dag)
+push_task = PythonOperator(
+    task_id="push_model_to_foundry", python_callable=push_model_to_foundry, dag=dag
+)
 
 fetch_task >> drift_task >> retrain_task >> eval_task >> push_task

@@ -34,13 +34,19 @@ class TestModelInfo:
 
     def test_model_info_building_types(self, client):
         data = client.get("/model/info").get_json()
-        assert set(data["building_types"]) == {"residential", "commercial", "industrial", "data_center"}
+        assert set(data["building_types"]) == {
+            "residential",
+            "commercial",
+            "industrial",
+            "data_center",
+        }
 
 
 class TestForecast:
     def test_forecast_valid(self, client, patch_models, valid_forecast_request):
-        r = client.post("/forecast", data=json.dumps(valid_forecast_request),
-                        content_type="application/json")
+        r = client.post(
+            "/forecast", data=json.dumps(valid_forecast_request), content_type="application/json"
+        )
         assert r.status_code == 200
         data = r.get_json()
         assert "forecast_kwh" in data
@@ -76,8 +82,9 @@ class TestForecast:
         assert r.status_code == 400
 
     def test_forecast_response_has_request_id(self, client, patch_models, valid_forecast_request):
-        r = client.post("/forecast", data=json.dumps(valid_forecast_request),
-                        content_type="application/json")
+        r = client.post(
+            "/forecast", data=json.dumps(valid_forecast_request), content_type="application/json"
+        )
         assert "X-Request-ID" in r.headers
 
     def test_forecast_horizon_out_of_range(self, client, patch_models, valid_forecast_request):
@@ -88,8 +95,9 @@ class TestForecast:
 
 class TestAnomaly:
     def test_anomaly_valid(self, client, patch_models, valid_anomaly_request):
-        r = client.post("/anomaly", data=json.dumps(valid_anomaly_request),
-                        content_type="application/json")
+        r = client.post(
+            "/anomaly", data=json.dumps(valid_anomaly_request), content_type="application/json"
+        )
         assert r.status_code == 200
         data = r.get_json()
         assert "is_anomaly" in data
@@ -114,14 +122,19 @@ class TestAnomaly:
 
 class TestBatch:
     def test_batch_forecast_valid(self, client, patch_models, valid_forecast_request):
-        payload = {"meters": [valid_forecast_request,
-                              {**valid_forecast_request, "meter_id": "MTR-002"}]}
-        r = client.post("/forecast/batch", data=json.dumps(payload), content_type="application/json")
+        payload = {
+            "meters": [valid_forecast_request, {**valid_forecast_request, "meter_id": "MTR-002"}]
+        }
+        r = client.post(
+            "/forecast/batch", data=json.dumps(payload), content_type="application/json"
+        )
         assert r.status_code == 200
         data = r.get_json()
         assert data["count"] == 2
 
     def test_batch_too_large(self, client, patch_models, valid_forecast_request):
         payload = {"meters": [valid_forecast_request] * 201}
-        r = client.post("/forecast/batch", data=json.dumps(payload), content_type="application/json")
+        r = client.post(
+            "/forecast/batch", data=json.dumps(payload), content_type="application/json"
+        )
         assert r.status_code == 400
