@@ -37,8 +37,8 @@ class DemandForecaster:
 
     def __init__(
         self,
-        xgb_params: Optional[dict] = None,
-        lgb_params: Optional[dict] = None,
+        xgb_params: dict | None = None,
+        lgb_params: dict | None = None,
         quantile_alpha: float = 0.1,
         random_state: int = 42,
     ) -> None:
@@ -95,7 +95,7 @@ class DemandForecaster:
         self.lgb_upper = lgb.LGBMRegressor(**lgb_upper_params)
 
         self.scaler = StandardScaler()
-        self._shap_explainer: Optional[shap.TreeExplainer] = None
+        self._shap_explainer: shap.TreeExplainer | None = None
 
         # Ensemble weights: XGB 60%, LGB 40%
         self._weights = np.array([0.6, 0.4])
@@ -108,10 +108,10 @@ class DemandForecaster:
         self,
         X: pd.DataFrame,
         y: pd.Series,
-        eval_X: Optional[pd.DataFrame] = None,
-        eval_y: Optional[pd.Series] = None,
+        eval_X: pd.DataFrame | None = None,
+        eval_y: pd.Series | None = None,
         mlflow_run: bool = True,
-    ) -> "DemandForecaster":
+    ) -> DemandForecaster:
         """Fit the ensemble on training data.
 
         Args:
@@ -250,14 +250,14 @@ class DemandForecaster:
     # Persistence
     # ------------------------------------------------------------------
 
-    def save(self, path: Optional[Path] = None) -> Path:
+    def save(self, path: Path | None = None) -> Path:
         path = Path(path) if path else ARTIFACT_DIR / "demand_forecaster.joblib"
         joblib.dump(self, path)
         logger.info("DemandForecaster saved → {}", path)
         return path
 
     @classmethod
-    def load(cls, path: Optional[Path] = None) -> "DemandForecaster":
+    def load(cls, path: Path | None = None) -> DemandForecaster:
         path = Path(path) if path else ARTIFACT_DIR / "demand_forecaster.joblib"
         obj = joblib.load(path)
         logger.info("DemandForecaster loaded ← {}", path)

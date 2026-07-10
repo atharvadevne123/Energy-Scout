@@ -77,7 +77,7 @@ class EnergyFeatureEngineer(BaseEstimator, TransformerMixin):
     # Fit / Transform
     # ------------------------------------------------------------------
 
-    def fit(self, df: pd.DataFrame, y=None) -> "EnergyFeatureEngineer":
+    def fit(self, df: pd.DataFrame, y=None) -> EnergyFeatureEngineer:
         """Compute any statistics needed for stable transformation."""
         transformed = self._transform_impl(df, fit=True)
         self._output_cols = list(transformed.columns)

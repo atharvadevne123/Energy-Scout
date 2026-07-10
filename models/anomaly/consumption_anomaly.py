@@ -74,14 +74,14 @@ class ConsumptionAnomalyDetector:
         self._fitted = False
 
         # Running statistics for z-score
-        self._running_mean: Optional[float] = None
-        self._running_std: Optional[float] = None
+        self._running_mean: float | None = None
+        self._running_std: float | None = None
 
     # ------------------------------------------------------------------
     # Training
     # ------------------------------------------------------------------
 
-    def fit(self, df: pd.DataFrame) -> "ConsumptionAnomalyDetector":
+    def fit(self, df: pd.DataFrame) -> ConsumptionAnomalyDetector:
         """Fit the detector on historical consumption data.
 
         Args:
@@ -195,14 +195,14 @@ class ConsumptionAnomalyDetector:
     # Persistence
     # ------------------------------------------------------------------
 
-    def save(self, path: Optional[Path] = None) -> Path:
+    def save(self, path: Path | None = None) -> Path:
         path = Path(path) if path else ARTIFACT_DIR / "consumption_anomaly.joblib"
         joblib.dump(self, path)
         logger.info("ConsumptionAnomalyDetector saved → {}", path)
         return path
 
     @classmethod
-    def load(cls, path: Optional[Path] = None) -> "ConsumptionAnomalyDetector":
+    def load(cls, path: Path | None = None) -> ConsumptionAnomalyDetector:
         path = Path(path) if path else ARTIFACT_DIR / "consumption_anomaly.joblib"
         obj = joblib.load(path)
         logger.info("ConsumptionAnomalyDetector loaded ← {}", path)

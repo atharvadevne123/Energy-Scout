@@ -15,8 +15,9 @@ import concurrent.futures
 import io
 import os
 import time
+from collections.abc import Iterable
 from datetime import datetime, timezone
-from typing import Any, Iterable, Optional
+from typing import Any, Optional
 
 import pandas as pd
 import requests
@@ -64,8 +65,8 @@ class FoundryClient:
 
     def __init__(
         self,
-        host: Optional[str] = None,
-        token: Optional[str] = None,
+        host: str | None = None,
+        token: str | None = None,
         timeout: int = DEFAULT_TIMEOUT,
     ):
         self.host = (host or os.getenv("FOUNDRY_HOST", "")).rstrip("/")
@@ -255,7 +256,7 @@ class FoundryClient:
         self,
         dataset_rid: str,
         webhook_url: str,
-        event_types: Optional[list[str]] = None,
+        event_types: list[str] | None = None,
     ) -> dict[str, Any]:
         """
         Register a webhook subscription for dataset events.
@@ -357,7 +358,7 @@ class FoundryClient:
         self,
         metrics_dict: dict[str, Any],
         dashboard_rid: str,
-        run_id: Optional[str] = None,
+        run_id: str | None = None,
     ) -> dict[str, Any]:
         """Push a metrics payload to a Foundry metrics sink / dashboard."""
         payload = {
@@ -423,7 +424,7 @@ class FoundryClient:
     # Context manager support
     # ------------------------------------------------------------------
 
-    def __enter__(self) -> "FoundryClient":
+    def __enter__(self) -> FoundryClient:
         return self
 
     def __exit__(self, *args) -> None:
